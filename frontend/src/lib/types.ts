@@ -11,3 +11,19 @@ export interface Config {
   transfer_day: number; // 0=Sunday .. 6=Saturday
   last_paid_week: number;
 }
+
+export interface VaultInfo {
+  burrow_contract: string;
+  usdc_contract: string;
+}
+
+export interface BurrowSupplied {
+  token_id: string;
+  shares: string;
+  balance: string;
+}
+
+export interface BurrowAccount {
+  supplied: BurrowSupplied[];
+  [key: string]: unknown;
+}

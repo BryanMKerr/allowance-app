@@ -2,21 +2,61 @@ use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
 use near_sdk::json_types::U128;
 use near_sdk::store::Vector;
 use near_sdk::{
-    env, log, near, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise,
+    env, ext_contract, log, near, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault,
+    Promise, PromiseError,
 };
 use near_sdk::serde::{Deserialize, Serialize};
 
 /// USDC contract on NEAR mainnet.
 const USDC_CONTRACT: &str = "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1";
 
+/// Burrow lending contract on NEAR mainnet.
+const BURROW_CONTRACT: &str = "contract.main.burrow.near";
+
 /// Gas allocated to each ft_transfer cross-contract call.
 const GAS_FOR_FT_TRANSFER: Gas = Gas::from_tgas(10);
+
+/// Gas allocated to ft_transfer_call (Burrow deposit).
+const GAS_FOR_FT_TRANSFER_CALL: Gas = Gas::from_tgas(100);
+
+/// Gas allocated to Burrow execute (withdraw).
+const GAS_FOR_BURROW_EXECUTE: Gas = Gas::from_tgas(100);
+
+/// Gas reserved for the on_withdraw_complete callback.
+const GAS_FOR_WITHDRAW_CALLBACK: Gas = Gas::from_tgas(80);
 
 /// Nanoseconds in one day.
 const NANOS_PER_DAY: u64 = 86_400_000_000_000;
 
 /// Nanoseconds in one week.
 const NANOS_PER_WEEK: u64 = 7 * NANOS_PER_DAY;
+
+// ── External contract interfaces ─────────────────────────────────────────
+
+#[allow(dead_code)]
+#[ext_contract(ext_ft)]
+trait ExtFt {
+    fn ft_transfer(
+        &mut self,
+        receiver_id: AccountId,
+        amount: U128,
+        memo: Option<String>,
+    );
+
+    fn ft_transfer_call(
+        &mut self,
+        receiver_id: AccountId,
+        amount: U128,
+        memo: Option<String>,
+        msg: String,
+    ) -> String;
+}
+
+#[allow(dead_code)]
+#[ext_contract(ext_burrow)]
+trait ExtBurrow {
+    fn execute(&mut self, actions: Vec<near_sdk::serde_json::Value>) -> Promise;
+}
 
 // ── Storage keys ────────────────────────────────────────────────────────────
 
@@ -47,6 +87,15 @@ pub struct Config {
     pub kids: Vec<Kid>,
     pub transfer_day: u8,
     pub last_paid_week: u64,
+}
+
+// ── VaultInfo view struct ───────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct VaultInfo {
+    pub burrow_contract: String,
+    pub usdc_contract: String,
 }
 
 // ── Contract ────────────────────────────────────────────────────────────────
@@ -165,7 +214,7 @@ impl AllowanceContract {
         log!("Transfer day updated to {}", day);
     }
 
-    // ── Permissionless distribute ───────────────────────────────────────
+    // ── Permissionless distribute (now via Burrow withdraw) ─────────────
 
     pub fn distribute(&mut self) -> Promise {
         let timestamp = env::block_timestamp();
@@ -191,52 +240,92 @@ impl AllowanceContract {
 
         assert!(!active_kids.is_empty(), "No active kids to pay");
 
+        // Calculate total needed.
+        let total_needed: u128 = active_kids.iter().map(|k| k.amount.0).sum();
+
         // Mark week as paid.
         self.last_paid_week = current_week;
+
+        let burrow: AccountId = BURROW_CONTRACT.parse().unwrap();
+
+        // Withdraw the total needed from Burrow first.
+        let withdraw_action = near_sdk::serde_json::json!({
+            "Withdraw": {
+                "token_id": USDC_CONTRACT,
+                "max_amount": total_needed.to_string()
+            }
+        });
+
+        log!(
+            "Withdrawing {} USDC micro-units from Burrow for {} kid(s), week {}",
+            total_needed,
+            active_kids.len(),
+            current_week
+        );
+
+        // Serialize active_kids for the callback.
+        let kids_json = near_sdk::serde_json::to_string(&active_kids).unwrap();
+
+        ext_burrow::ext(burrow)
+            .with_static_gas(GAS_FOR_BURROW_EXECUTE)
+            .with_attached_deposit(NearToken::from_yoctonear(1))
+            .execute(vec![withdraw_action])
+            .then(
+                Self::ext(env::current_account_id())
+                    .with_static_gas(GAS_FOR_WITHDRAW_CALLBACK)
+                    .on_withdraw_complete(kids_json),
+            )
+    }
+
+    /// Callback after Burrow withdrawal completes. Sends USDC to each kid.
+    #[private]
+    pub fn on_withdraw_complete(
+        &mut self,
+        kids_json: String,
+        #[callback_result] result: Result<(), PromiseError>,
+    ) -> Promise {
+        assert!(result.is_ok(), "Burrow withdrawal failed");
+
+        let active_kids: Vec<Kid> =
+            near_sdk::serde_json::from_str(&kids_json).expect("Failed to deserialize kids");
 
         let usdc: AccountId = USDC_CONTRACT.parse().unwrap();
 
         // Build a chain of ft_transfer promises.
-        let mut promise = Promise::new(usdc.clone()).function_call(
-            "ft_transfer".to_string(),
-            near_sdk::serde_json::json!({
-                "receiver_id": active_kids[0].wallet_id.to_string(),
-                "amount": active_kids[0].amount.0.to_string(),
-                "memo": format!("Allowance for {}", active_kids[0].name),
-            })
-            .to_string()
-            .into_bytes(),
-            NearToken::from_yoctonear(1),
-            GAS_FOR_FT_TRANSFER,
-        );
+        let mut promise = ext_ft::ext(usdc.clone())
+            .with_static_gas(GAS_FOR_FT_TRANSFER)
+            .with_attached_deposit(NearToken::from_yoctonear(1))
+            .ft_transfer(
+                active_kids[0].wallet_id.clone(),
+                active_kids[0].amount,
+                Some(format!("Allowance for {}", active_kids[0].name)),
+            );
 
         for kid in active_kids.iter().skip(1) {
-            promise = promise.and(Promise::new(usdc.clone()).function_call(
-                "ft_transfer".to_string(),
-                near_sdk::serde_json::json!({
-                    "receiver_id": kid.wallet_id.to_string(),
-                    "amount": kid.amount.0.to_string(),
-                    "memo": format!("Allowance for {}", kid.name),
-                })
-                .to_string()
-                .into_bytes(),
-                NearToken::from_yoctonear(1),
-                GAS_FOR_FT_TRANSFER,
-            ));
+            promise = promise.and(
+                ext_ft::ext(usdc.clone())
+                    .with_static_gas(GAS_FOR_FT_TRANSFER)
+                    .with_attached_deposit(NearToken::from_yoctonear(1))
+                    .ft_transfer(
+                        kid.wallet_id.clone(),
+                        kid.amount,
+                        Some(format!("Allowance for {}", kid.name)),
+                    ),
+            );
         }
 
         log!(
-            "Distributing allowance to {} kid(s) for week {}",
-            active_kids.len(),
-            current_week
+            "Distributing allowance to {} kid(s)",
+            active_kids.len()
         );
 
         promise
     }
 
-    // ── NEP-141 receiver (accept USDC deposits) ────────────────────────
+    // ── NEP-141 receiver (accept USDC deposits, forward to Burrow) ──────
 
     /// Called by the USDC token contract when someone sends USDC to this contract.
+    /// Accepts the full deposit and forwards it to Burrow for yield.
     /// Returns "0" to signal that the full amount is accepted (nothing refunded).
     pub fn ft_on_transfer(
         &mut self,
@@ -252,14 +341,51 @@ impl AllowanceContract {
         );
 
         log!(
-            "Received {} USDC micro-units from {} (msg: {})",
+            "Received {} USDC micro-units from {} (msg: {}). Forwarding to Burrow.",
             amount.0,
             sender_id,
             msg
         );
 
+        // Forward the received USDC to Burrow for yield.
+        let burrow: AccountId = BURROW_CONTRACT.parse().unwrap();
+        ext_ft::ext(usdc)
+            .with_static_gas(GAS_FOR_FT_TRANSFER_CALL)
+            .with_attached_deposit(NearToken::from_yoctonear(1))
+            .ft_transfer_call(
+                burrow,
+                amount,
+                None,
+                String::new(),
+            )
+            .detach();
+
         // Return "0" — accept the entire deposit, refund nothing.
         "0".to_string()
+    }
+
+    // ── Owner-only manual Burrow withdrawal ─────────────────────────────
+
+    /// Manually withdraw USDC from Burrow back to this contract.
+    pub fn withdraw_from_vault(&mut self, amount: U128) -> Promise {
+        self.assert_owner();
+        assert!(amount.0 > 0, "Amount must be greater than zero");
+
+        let burrow: AccountId = BURROW_CONTRACT.parse().unwrap();
+
+        let withdraw_action = near_sdk::serde_json::json!({
+            "Withdraw": {
+                "token_id": USDC_CONTRACT,
+                "max_amount": amount.0.to_string()
+            }
+        });
+
+        log!("Owner withdrawing {} USDC micro-units from Burrow", amount.0);
+
+        ext_burrow::ext(burrow)
+            .with_static_gas(GAS_FOR_BURROW_EXECUTE)
+            .with_attached_deposit(NearToken::from_yoctonear(1))
+            .execute(vec![withdraw_action])
     }
 
     // ── View methods ────────────────────────────────────────────────────
@@ -275,6 +401,13 @@ impl AllowanceContract {
 
     pub fn get_kids(&self) -> Vec<Kid> {
         self.kids.iter().cloned().collect()
+    }
+
+    pub fn get_vault_info(&self) -> VaultInfo {
+        VaultInfo {
+            burrow_contract: BURROW_CONTRACT.to_string(),
+            usdc_contract: USDC_CONTRACT.to_string(),
+        }
     }
 }
 
@@ -454,5 +587,32 @@ mod tests {
             U128(10_000_000),
             "deposit".to_string(),
         );
+    }
+
+    #[test]
+    fn test_get_vault_info() {
+        setup_context(owner());
+        let contract = AllowanceContract::new(owner()).unwrap();
+        let info = contract.get_vault_info();
+        assert_eq!(info.burrow_contract, BURROW_CONTRACT);
+        assert_eq!(info.usdc_contract, USDC_CONTRACT);
+    }
+
+    #[test]
+    #[should_panic(expected = "Only the owner can call this method")]
+    fn test_withdraw_from_vault_not_owner() {
+        setup_context(owner());
+        let mut contract = AllowanceContract::new(owner()).unwrap();
+
+        setup_context("stranger.near".parse().unwrap());
+        contract.withdraw_from_vault(U128(1_000_000));
+    }
+
+    #[test]
+    #[should_panic(expected = "Amount must be greater than zero")]
+    fn test_withdraw_from_vault_zero_amount() {
+        setup_context(owner());
+        let mut contract = AllowanceContract::new(owner()).unwrap();
+        contract.withdraw_from_vault(U128(0));
     }
 }

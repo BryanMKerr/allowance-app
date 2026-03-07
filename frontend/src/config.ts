@@ -13,3 +13,8 @@ export const NEAR_WALLET_URL = "https://wallet.mainnet.near.org";
 export const NEAR_HELPER_URL = "https://helper.mainnet.near.org";
 
 export const NEAR_EXPLORER_URL = "https://nearblocks.io";
+
+export const BURROW_CONTRACT_ID = "contract.main.burrow.near";
+
+export const RHEA_APY_URL =
+  "https://lendingsdk.rhea.finance/get_assets_paged_detailed";

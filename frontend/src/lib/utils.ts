@@ -71,6 +71,14 @@ export function formatDate(date: Date): string {
 }
 
 /**
+ * Format an APY value (e.g. 4.23) as a percentage string.
+ */
+export function formatApy(apy: number): string {
+  if (isNaN(apy) || apy === 0) return "0.00%";
+  return `${apy.toFixed(2)}%`;
+}
+
+/**
  * Get the total weekly payout in micro-USDC for all active kids.
  */
 export function getTotalWeekly(kids: { amount: string; active: boolean }[]): number {

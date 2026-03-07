@@ -1,8 +1,8 @@
 "use client";
 
 import { JsonRpcProvider } from "near-api-js";
-import { CONTRACT_ID, USDC_CONTRACT_ID, NEAR_NODE_URL } from "@/config";
-import type { Config, Kid } from "./types";
+import { CONTRACT_ID, USDC_CONTRACT_ID, NEAR_NODE_URL, BURROW_CONTRACT_ID, RHEA_APY_URL } from "@/config";
+import type { Config, Kid, BurrowAccount, VaultInfo } from "./types";
 
 const provider = new JsonRpcProvider({ url: NEAR_NODE_URL });
 
@@ -35,6 +35,49 @@ export async function getContractUSDCBalance(): Promise<string> {
   return viewMethod<string>(USDC_CONTRACT_ID, "ft_balance_of", {
     account_id: CONTRACT_ID,
   });
+}
+
+export async function getVaultBalance(): Promise<string> {
+  try {
+    const account = await viewMethod<BurrowAccount>(
+      BURROW_CONTRACT_ID,
+      "get_account",
+      { account_id: CONTRACT_ID }
+    );
+
+    if (!account || !account.supplied) return "0";
+
+    const usdcEntry = account.supplied.find(
+      (s) => s.token_id === USDC_CONTRACT_ID
+    );
+
+    return usdcEntry?.balance ?? "0";
+  } catch {
+    return "0";
+  }
+}
+
+export async function getUsdcApy(): Promise<number> {
+  try {
+    const response = await fetch(RHEA_APY_URL);
+    const data = await response.json();
+
+    // The API returns an array of assets; find USDC by token_id.
+    const assets = Array.isArray(data) ? data : data?.data ?? [];
+    for (const asset of assets) {
+      if (asset.token_id === USDC_CONTRACT_ID) {
+        // supply_apy is typically a decimal (e.g., 0.05 for 5%)
+        return Number(asset.supply_apy ?? 0) * 100;
+      }
+    }
+    return 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function getVaultInfo(): Promise<VaultInfo> {
+  return viewMethod<VaultInfo>(CONTRACT_ID, "get_vault_info");
 }
 
 // ─── Contract Call Helpers ────────────────────────────────────
@@ -163,6 +206,28 @@ export async function distribute(
         params: {
           methodName: "distribute",
           args: {},
+          gas: GAS,
+          deposit: ZERO_DEPOSIT,
+        },
+      },
+    ],
+  });
+}
+
+export async function withdrawFromVault(
+  wallet: WalletCallMethod,
+  signerId: string,
+  amount: string
+): Promise<unknown> {
+  return wallet.signAndSendTransaction({
+    signerId,
+    receiverId: CONTRACT_ID,
+    actions: [
+      {
+        type: "FunctionCall",
+        params: {
+          methodName: "withdraw_from_vault",
+          args: { amount },
           gas: GAS,
           deposit: ZERO_DEPOSIT,
         },

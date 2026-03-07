@@ -29,6 +29,8 @@ import SettingsCard from "./SettingsCard";
 import {
   getConfig,
   getContractUSDCBalance,
+  getVaultBalance,
+  getUsdcApy,
   addKid,
   removeKid,
   updateKidAmount,
@@ -44,6 +46,7 @@ import {
   getNextPaymentDate,
   formatDate,
   getTotalWeekly,
+  formatApy,
 } from "@/lib/utils";
 import type { WalletCallMethod } from "@/lib/near";
 
@@ -52,6 +55,8 @@ export default function Dashboard() {
 
   const [config, setConfig] = useState<Config | null>(null);
   const [balance, setBalance] = useState<string>("0");
+  const [vaultBalance, setVaultBalance] = useState<string>("0");
+  const [usdcApy, setUsdcApy] = useState<number>(0);
   const [loadingData, setLoadingData] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -78,12 +83,16 @@ export default function Dashboard() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [cfg, bal] = await Promise.all([
+      const [cfg, bal, vBal, apy] = await Promise.all([
         getConfig(),
         getContractUSDCBalance(),
+        getVaultBalance(),
+        getUsdcApy(),
       ]);
       setConfig(cfg);
       setBalance(bal);
+      setVaultBalance(vBal);
+      setUsdcApy(apy);
     } catch (err) {
       console.error("Failed to fetch data:", err);
       showSnackbar("Failed to load contract data", "error");
@@ -311,7 +320,7 @@ export default function Dashboard() {
               >
                 <AccountBalanceWalletIcon sx={{ opacity: 0.8 }} />
                 <Typography variant="body2" sx={{ opacity: 0.8 }}>
-                  USDC Balance
+                  Vault Balance
                 </Typography>
               </Box>
               <Typography
@@ -319,19 +328,35 @@ export default function Dashboard() {
                 sx={{
                   fontWeight: 800,
                   letterSpacing: "-0.02em",
-                  mb: 1,
+                  mb: 0.5,
                 }}
               >
-                {formatUSDC(balance)}
+                {formatUSDC(vaultBalance)}
               </Typography>
+              {usdcApy > 0 && (
+                <Box
+                  sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.5 }}
+                >
+                  <TrendingUpIcon sx={{ fontSize: 18, opacity: 0.9 }} />
+                  <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                    {formatApy(usdcApy)} APY
+                  </Typography>
+                </Box>
+              )}
               <Box
-                sx={{ display: "flex", alignItems: "center", gap: 1, mt: 1 }}
+                sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}
               >
                 <TrendingUpIcon sx={{ fontSize: 18, opacity: 0.7 }} />
                 <Typography variant="body2" sx={{ opacity: 0.7 }}>
                   {formatUSDC(totalWeekly.toString())} weekly
                 </Typography>
               </Box>
+              <Typography
+                variant="caption"
+                sx={{ opacity: 0.5, display: "block", mt: 1.5 }}
+              >
+                Earning yield via RHEA Finance
+              </Typography>
             </CardContent>
           </Card>
         </Grid>
