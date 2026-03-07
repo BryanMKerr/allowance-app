@@ -15,6 +15,7 @@ import {
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import PaymentsIcon from "@mui/icons-material/Payments";
+import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
 import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
@@ -23,6 +24,7 @@ import KidsList from "./KidsList";
 import AddKidDialog from "./AddKidDialog";
 import EditKidDialog from "./EditKidDialog";
 import FundDialog from "./FundDialog";
+import CrossChainFundDialog from "./CrossChainFundDialog";
 import SettingsCard from "./SettingsCard";
 import {
   getConfig,
@@ -57,6 +59,7 @@ export default function Dashboard() {
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [fundDialogOpen, setFundDialogOpen] = useState(false);
+  const [crossChainDialogOpen, setCrossChainDialogOpen] = useState(false);
   const [editingKid, setEditingKid] = useState<Kid | null>(null);
 
   // Snackbar
@@ -388,6 +391,14 @@ export default function Dashboard() {
             Fund Wallet
           </Button>
           <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<SwapHorizIcon />}
+            onClick={() => setCrossChainDialogOpen(true)}
+          >
+            Fund from Any Chain
+          </Button>
+          <Button
             variant="contained"
             color="secondary"
             startIcon={
@@ -464,6 +475,18 @@ export default function Dashboard() {
         onFund={handleFund}
         loading={actionLoading}
         walletConnected={!!accountId}
+        onOpenCrossChain={() => {
+          setFundDialogOpen(false);
+          setCrossChainDialogOpen(true);
+        }}
+      />
+      <CrossChainFundDialog
+        open={crossChainDialogOpen}
+        onClose={() => setCrossChainDialogOpen(false)}
+        onFundContract={() => {
+          setCrossChainDialogOpen(false);
+          setFundDialogOpen(true);
+        }}
       />
 
       {/* Snackbar */}

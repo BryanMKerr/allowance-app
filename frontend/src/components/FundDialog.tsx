@@ -19,6 +19,7 @@ import {
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import AccountBalanceIcon from "@mui/icons-material/AccountBalance";
 import SendIcon from "@mui/icons-material/Send";
+import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
 import { CONTRACT_ID } from "@/config";
 
 interface FundDialogProps {
@@ -27,6 +28,7 @@ interface FundDialogProps {
   onFund: (amountDollars: number) => Promise<void>;
   loading: boolean;
   walletConnected: boolean;
+  onOpenCrossChain?: () => void;
 }
 
 export default function FundDialog({
@@ -35,6 +37,7 @@ export default function FundDialog({
   onFund,
   loading,
   walletConnected,
+  onOpenCrossChain,
 }: FundDialogProps) {
   const [amount, setAmount] = useState("");
   const [error, setError] = useState("");
@@ -146,6 +149,24 @@ export default function FundDialog({
                 transfer.
               </Alert>
             </>
+          )}
+
+          {onOpenCrossChain && (
+            <Box sx={{ textAlign: "center", pt: 1 }}>
+              <Divider sx={{ mb: 2 }} />
+              <Button
+                variant="text"
+                size="small"
+                startIcon={<SwapHorizIcon />}
+                onClick={() => {
+                  handleClose();
+                  onOpenCrossChain();
+                }}
+                sx={{ textTransform: "none", color: "text.secondary" }}
+              >
+                Or fund from another chain (Ethereum, Arbitrum, etc.)
+              </Button>
+            </Box>
           )}
         </Box>
       </DialogContent>
