@@ -301,8 +301,6 @@ export default function Dashboard() {
   const transferDay = config?.transfer_day ?? 5;
   const totalWeekly = getTotalWeekly(kids);
   const nextPayment = getNextPaymentDate(transferDay);
-  const isOwner = config?.owner_id === accountId;
-
   return (
     <Box sx={{ maxWidth: 900, mx: "auto", p: { xs: 2, sm: 3 } }}>
       {/* Balance and Next Payment Cards */}
@@ -399,54 +397,52 @@ export default function Dashboard() {
       </Grid>
 
       {/* Action Buttons */}
-      {isOwner && (
-        <Box
-          sx={{
-            display: "flex",
-            gap: 1.5,
-            mb: 3,
-            flexWrap: "wrap",
-          }}
+      <Box
+        sx={{
+          display: "flex",
+          gap: 1.5,
+          mb: 3,
+          flexWrap: "wrap",
+        }}
+      >
+        <Button
+          variant="contained"
+          startIcon={<AccountBalanceWalletIcon />}
+          onClick={() => setFundDialogOpen(true)}
         >
-          <Button
-            variant="contained"
-            startIcon={<AccountBalanceWalletIcon />}
-            onClick={() => setFundDialogOpen(true)}
-          >
-            Fund Wallet
-          </Button>
-          <Button
-            variant="outlined"
-            color="primary"
-            startIcon={<SwapHorizIcon />}
-            onClick={() => setCrossChainDialogOpen(true)}
-          >
-            Fund from Any Chain
-          </Button>
-          <Button
-            variant="contained"
-            color="secondary"
-            startIcon={
-              actionLoading ? (
-                <CircularProgress size={18} color="inherit" />
-              ) : (
-                <PaymentsIcon />
-              )
-            }
-            onClick={handleDistribute}
-            disabled={actionLoading || kids.length === 0}
-          >
-            Pay Now
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<AddIcon />}
-            onClick={() => setAddDialogOpen(true)}
-          >
-            Add Recipient
-          </Button>
-        </Box>
-      )}
+          Fund Wallet
+        </Button>
+        <Button
+          variant="outlined"
+          color="primary"
+          startIcon={<SwapHorizIcon />}
+          onClick={() => setCrossChainDialogOpen(true)}
+        >
+          Fund from Any Chain
+        </Button>
+        <Button
+          variant="contained"
+          color="secondary"
+          startIcon={
+            actionLoading ? (
+              <CircularProgress size={18} color="inherit" />
+            ) : (
+              <PaymentsIcon />
+            )
+          }
+          onClick={handleDistribute}
+          disabled={actionLoading || kids.length === 0}
+        >
+          Pay Now
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<AddIcon />}
+          onClick={() => setAddDialogOpen(true)}
+        >
+          Add Recipient
+        </Button>
+      </Box>
 
       {/* Kids List and Settings */}
       <Grid container spacing={2.5}>
@@ -459,7 +455,7 @@ export default function Dashboard() {
               kids={kids}
               onEdit={openEditDialog}
               onRemove={handleRemoveKid}
-              disabled={!isOwner || actionLoading}
+              disabled={actionLoading}
             />
           </Box>
         </Grid>
@@ -472,7 +468,7 @@ export default function Dashboard() {
             currentDay={transferDay}
             onSave={handleSetTransferDay}
             loading={actionLoading}
-            disabled={!isOwner}
+            disabled={actionLoading}
           />
         </Grid>
       </Grid>
